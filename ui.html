@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #111111;
+      --muted: #666666;
+      --optional: #888888;
+      --field-bg: #ffffff;
+      --field-border: #cccccc;
+      --primary-bg: #111111;
+      --primary-text: #ffffff;
+      --secondary-bg: #eeeeee;
+      --secondary-text: #111111;
+      --bar-border: #dddddd;
+    }
+    body, input, textarea, select, button, label {
+      font-family: "Roboto Mono", monospace;
+      font-size: 12px;
+    }
+    body {
+      margin: 0;
+      padding: 16px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    #content { overflow: visible; }
+    label { display: block; }
+    .form label { margin-top: 16px; margin-bottom: 4px; }
+    .optional { color: var(--optional); font-size: 11px; }
+    input, textarea, select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--field-border);
+      background: var(--field-bg);
+      color: var(--text);
+    }
+    textarea { resize: vertical; }
+    .form { display: block; }
+    .decision-input { min-height: 120px; }
+    .theme-option {
+      border: 1px solid var(--field-border);
+      background: var(--field-bg);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: auto;
+      flex: none;
+      margin-top: 4px;
+      cursor: pointer;
+    }
+    .theme-option + .theme-option { margin-left: 8px; }
+    .theme-option.selected {
+      border-color: var(--text);
+      box-shadow: inset 0 0 0 1px var(--text);
+    }
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 1px solid var(--field-border);
+      flex-shrink: 0;
+    }
+    .swatch-light { background: #ffffff; }
+    .swatch-dark { background: #111111; border-color: #666666; }
+    .footer {
+      border-top: 1px solid var(--bar-border);
+      padding-top: 16px;
+      background: var(--bg);
+    }
+    .actions { display: flex; gap: 8px; }
+    .actions button {
+      flex: 1;
+      padding: 10px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+    }
+    .actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #save { background: var(--primary-bg); color: var(--primary-text); }
+    #close { background: var(--secondary-bg); color: var(--secondary-text); }
+    .selection-banner {
+      font-size: 11px;
+      line-height: 1.4;
+      color: var(--muted);
+      padding-bottom: 12px;
+      margin-bottom: 4px;
+      border-bottom: 1px dashed #e0e0e0;
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .selection-banner .label {
+      flex: 0 0 auto;
+    }
+    .selection-banner .frame-name {
+      color: var(--text);
+      flex: 1 1 auto;
+      min-width: 0;
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="content"></div>
+  <div class="footer">
+    <div class="actions">
+      <button id="close">Close</button>
+      <button id="save">Save</button>
+    </div>
+  </div>
+
+  <script>
+    const content = document.getElementById("content");
+    const closeButton = document.getElementById("close");
+    const saveButton = document.getElementById("save");
+    const NUDGE_MESSAGE = "Select a frame to attach this note, or create on canvas.";
+    const BODY_HORIZONTAL_PADDING = 28;
+    const DEFAULT_STATE_OPTIONS = [
+      { id: "needs_clarification", label: "❓ Needs Clarification" },
+      { id: "in_progress", label: "⏳ In Progress" },
+      { id: "in_review", label: "👀 In Review" },
+      { id: "completed", label: "✅ Completed" }
+    ];
+    let currentTheme = "light";
+    let currentDate = "";
+    let lockedWidth = 0;
+
+    function setNoteTheme(theme) {
+      currentTheme = theme === "dark" ? "dark" : "light";
+      updateThemeSelectionUI();
+    }
+
+    function updateThemeSelectionUI() {
+      const options = content.querySelectorAll(".theme-option");
+      options.forEach((option) => {
+        const selected = option.getAttribute("data-theme-value") === currentTheme;
+        option.classList.toggle("selected", selected);
+        option.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+    }
+
+    function setFooterState(hasForm) {
+      saveButton.disabled = !hasForm;
+    }
+
+    function getLockedWidth() {
+      if (lockedWidth > 0) return lockedWidth;
+      const probe = document.createElement("span");
+      probe.className = "selection-banner";
+      probe.textContent = NUDGE_MESSAGE;
+      probe.style.position = "fixed";
+      probe.style.visibility = "hidden";
+      probe.style.pointerEvents = "none";
+      probe.style.whiteSpace = "nowrap";
+      probe.style.paddingBottom = "0";
+      probe.style.marginBottom = "0";
+      probe.style.borderBottom = "0";
+      document.body.appendChild(probe);
+      lockedWidth = Math.ceil(probe.getBoundingClientRect().width + BODY_HORIZONTAL_PADDING);
+      probe.remove();
+      return lockedWidth;
+    }
+
+    function escapeHTML(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function requestResize() {
+      window.requestAnimationFrame(() => {
+        const contentHeight = Math.ceil(document.documentElement.scrollHeight);
+        parent.postMessage({
+          pluginMessage: {
+            type: "RESIZE_UI",
+            width: getLockedWidth(),
+            height: contentHeight
+          }
+        }, "*");
+      });
+    }
+
+    function selectionBannerHTML(selection) {
+      if (selection) {
+        const safeName = escapeHTML(selection.name);
+        return `<div class="selection-banner"><span class="label">Note will be attached to:</span><span class="frame-name" title="${safeName}">${safeName}</span></div>`;
+      }
+      return `<div class="selection-banner"><span class="label">${NUDGE_MESSAGE}</span></div>`;
+    }
+
+    function renderForm(data, selection, stateOptions) {
+      const options = Array.isArray(stateOptions) && stateOptions.length
+        ? stateOptions
+        : DEFAULT_STATE_OPTIONS;
+      setFooterState(true);
+      content.innerHTML = `
+        ${selectionBannerHTML(selection)}
+        <div class="form">
+          <label>Status</label>
+          <select id="status">
+            ${options
+              .map((option) => {
+                const id = escapeHTML(option.id);
+                const label = escapeHTML(option.label);
+                const selected = data.status === option.id ? "selected" : "";
+                return `<option value="${id}" ${selected}>${label}</option>`;
+              })
+              .join("")}
+          </select>
+
+          <label>Design Decision</label>
+          <textarea id="decision" class="decision-input" placeholder="What was decided?">${data.decision || ""}</textarea>
+
+          <label>Decision Source <span class="optional">(Optional)</span></label>
+          <input id="source" placeholder="Who provided this information?" value="${data.source || ""}" />
+
+          <label>Interface Theme</label>
+          <button type="button" class="theme-option" data-theme-value="light" aria-pressed="false">
+            <span class="swatch swatch-light"></span>
+            Light
+          </button>
+          <button type="button" class="theme-option" data-theme-value="dark" aria-pressed="false">
+            <span class="swatch swatch-dark"></span>
+            Dark
+          </button>
+        </div>
+      `;
+
+      const themeOptions = content.querySelectorAll(".theme-option");
+      themeOptions.forEach((option) => {
+        option.onclick = () => setNoteTheme(option.getAttribute("data-theme-value"));
+      });
+      currentDate = data.date || new Date().toISOString().slice(0, 10);
+      setNoteTheme(data.theme);
+      requestResize();
+    }
+
+    function updateBanner(selection) {
+      const existing = content.querySelector(".selection-banner");
+      if (existing) {
+        const newBanner = document.createElement("div");
+        newBanner.innerHTML = selectionBannerHTML(selection);
+        existing.replaceWith(newBanner.firstElementChild);
+      }
+    }
+
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+
+      if (msg.type === "LOAD") {
+        const formExists = content.querySelector(".form");
+        if (formExists) {
+          updateBanner(msg.selection);
+        } else {
+          renderForm(msg.data, msg.selection, msg.stateOptions);
+        }
+      }
+      if (msg.type === "REFRESH") {
+        parent.postMessage({ pluginMessage: { type: "INIT" } }, "*");
+      }
+    };
+
+    closeButton.onclick = () => {
+      parent.postMessage({ pluginMessage: { type: "CLOSE" } }, "*");
+    };
+
+    saveButton.onclick = () => {
+      const decision = document.getElementById("decision");
+      const status = document.getElementById("status");
+      const source = document.getElementById("source");
+      if (!decision || !status || !source) return;
+
+      parent.postMessage({
+        pluginMessage: {
+          type: "SAVE",
+          data: {
+            decision: decision.value,
+            status: status.value,
+            source: source.value,
+            date: currentDate,
+            theme: currentTheme
+          }
+        }
+      }, "*");
+    };
+
+    setNoteTheme("light");
+    setFooterState(false);
+    requestResize();
+    parent.postMessage({ pluginMessage: { type: "INIT" } }, "*");
+  </script>
+</body>
+</html>
