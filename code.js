@@ -217,6 +217,7 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
   await ensureFonts();
   const palette = getNotePalette(data.theme);
   const hasTargetNode = !!targetNode;
+  const isUpdate = !!preferredContainer;
 
   const WIDTH = 302;
 
@@ -232,7 +233,7 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
 
   const containerName = hasTargetNode ? ("For " + targetNode.name) : "Note";
   let container = preferredContainer || null;
-  let isNewContainer = !container;
+  const isNewContainer = !container;
 
   if (!container) {
     container = figma.createFrame();
@@ -243,8 +244,6 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
       container.x = figma.viewport.center.x - WIDTH / 2;
       container.y = figma.viewport.center.y;
     }
-  } else {
-    clearChildren(container);
   }
   container.name = containerName;
   container.setPluginData("decisionNoteTargetId", hasTargetNode ? targetNode.id : "");
@@ -261,80 +260,191 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
   unclip(container);
   setFixedWidth(container, WIDTH);
 
-  // --- Header ---
-  const header = figma.createFrame();
-  header.name = "Decision Note Header";
-  header.layoutMode = "HORIZONTAL";
-  header.itemSpacing = 10;
+  function createEntryGroup() {
+    const group = figma.createFrame();
+    group.name = "Decision Note Group";
+    group.layoutMode = "VERTICAL";
+    group.itemSpacing = BODY_GAP;
+    group.fills = [];
+    group.strokes = [];
+    group.effects = [];
+    group.counterAxisSizingMode = "FIXED";
+    setHugHeight(group);
+    unclip(group);
+    setFixedWidth(group, BODY_WRAP);
+    return group;
+  }
 
-  header.paddingTop = HEADER_PAD_Y;
-  header.paddingBottom = HEADER_PAD_Y;
-  header.paddingLeft = HEADER_PAD_X;
-  header.paddingRight = HEADER_PAD_X;
+  function createDivider() {
+    const divider = figma.createLine();
+    divider.name = "Decision Note Divider";
+    divider.resizeWithoutConstraints(BODY_WRAP, 0);
+    divider.strokes = [{ type: "SOLID", color: rgbFromHex("#D6D6D6") }];
+    divider.strokeWeight = 1;
+    divider.dashPattern = [4, 4];
+    divider.effects = [];
+    return divider;
+  }
 
-  header.primaryAxisAlignItems = "CENTER";
-  header.counterAxisAlignItems = "CENTER";
+  function styleHeader(header) {
+    header.name = "Decision Note Header";
+    header.layoutMode = "HORIZONTAL";
+    header.itemSpacing = 10;
 
-  header.fills = [{ type: "SOLID", color: rgbFromHex(palette.surface) }];
-  header.strokes = [{ type: "SOLID", color: rgbFromHex(palette.ink) }];
-  header.strokeAlign = "INSIDE";
-  header.strokeWeight = 1;
+    header.paddingTop = HEADER_PAD_Y;
+    header.paddingBottom = HEADER_PAD_Y;
+    header.paddingLeft = HEADER_PAD_X;
+    header.paddingRight = HEADER_PAD_X;
 
-  // top/left/right only
-  header.strokeTopWeight = 1;
-  header.strokeLeftWeight = 1;
-  header.strokeRightWeight = 1;
-  header.strokeBottomWeight = 0;
+    header.primaryAxisAlignItems = "CENTER";
+    header.counterAxisAlignItems = "CENTER";
 
-  header.topLeftRadius = 8;
-  header.topRightRadius = 8;
-  header.bottomLeftRadius = 0;
-  header.bottomRightRadius = 0;
+    header.fills = [{ type: "SOLID", color: rgbFromHex(palette.surface) }];
+    header.strokes = [{ type: "SOLID", color: rgbFromHex(palette.ink) }];
+    header.strokeAlign = "INSIDE";
+    header.strokeWeight = 1;
 
-  applyShadow(header);
-  unclip(header);
+    header.strokeTopWeight = 1;
+    header.strokeLeftWeight = 1;
+    header.strokeRightWeight = 1;
+    header.strokeBottomWeight = 0;
 
-  header.primaryAxisSizingMode = "FIXED";
-  setHugHeight(header); // HORIZONTAL => counterAxis AUTO (hug height)
-  setFixedWidth(header, WIDTH);
+    header.topLeftRadius = 8;
+    header.topRightRadius = 8;
+    header.bottomLeftRadius = 0;
+    header.bottomRightRadius = 0;
 
-  addWrappedText(header, "Design Decision", {
-    size: 16,
-    bold: true,
-    wrapWidth: HEADER_WRAP,
-    color: palette.ink
-  });
+    applyShadow(header);
+    unclip(header);
 
-  // --- Body ---
-  const body = figma.createFrame();
-  body.name = "Decision Note Body";
-  body.layoutMode = "VERTICAL";
-  body.itemSpacing = BODY_GAP;
+    header.primaryAxisSizingMode = "FIXED";
+    setHugHeight(header);
+    setFixedWidth(header, WIDTH);
 
-  body.paddingTop = BODY_PAD;
-  body.paddingBottom = BODY_PAD;
-  body.paddingLeft = BODY_PAD;
-  body.paddingRight = BODY_PAD;
+    clearChildren(header);
+    addWrappedText(header, "Design Decision", {
+      size: 16,
+      bold: true,
+      wrapWidth: HEADER_WRAP,
+      color: palette.ink
+    });
+  }
 
-  body.primaryAxisAlignItems = "MIN";
-  body.counterAxisAlignItems = "MIN";
+  function styleHistory(history) {
+    history.name = "Decision Note History";
+    history.layoutMode = "VERTICAL";
+    history.itemSpacing = 18;
 
-  body.fills = [{ type: "SOLID", color: rgbFromHex(palette.surface) }];
-  body.strokes = [{ type: "SOLID", color: rgbFromHex(palette.ink) }];
-  body.strokeAlign = "INSIDE";
-  body.strokeWeight = 1;
+    history.paddingTop = BODY_PAD;
+    history.paddingBottom = BODY_PAD;
+    history.paddingLeft = BODY_PAD;
+    history.paddingRight = BODY_PAD;
 
-  body.topLeftRadius = 0;
-  body.topRightRadius = 0;
-  body.bottomLeftRadius = 8;
-  body.bottomRightRadius = 8;
+    history.primaryAxisAlignItems = "MIN";
+    history.counterAxisAlignItems = "MIN";
 
-  applyShadow(body);
-  unclip(body);
+    history.fills = [{ type: "SOLID", color: rgbFromHex(palette.surface) }];
+    history.strokes = [{ type: "SOLID", color: rgbFromHex(palette.ink) }];
+    history.strokeAlign = "INSIDE";
+    history.strokeWeight = 1;
 
-  body.counterAxisSizingMode = "FIXED";
-  setHugHeight(body); // VERTICAL => primary AUTO (hug height)
-  setFixedWidth(body, WIDTH);
+    history.topLeftRadius = 0;
+    history.topRightRadius = 0;
+    history.bottomLeftRadius = 8;
+    history.bottomRightRadius = 8;
+
+    applyShadow(history);
+    unclip(history);
+
+    history.counterAxisSizingMode = "FIXED";
+    setHugHeight(history);
+    setFixedWidth(history, WIDTH);
+  }
+
+  function wrapNodesIntoGroup(nodes) {
+    const group = createEntryGroup();
+    for (const child of nodes) group.appendChild(child);
+    return group;
+  }
+
+  let header = null;
+  let history = null;
+  for (const child of container.children) {
+    if (child.type !== "FRAME") continue;
+    if (!header && child.name === "Decision Note Header") header = child;
+    if (!history && child.name === "Decision Note History") history = child;
+  }
+
+  if (!history && header) {
+    for (const child of container.children) {
+      if (child.type === "FRAME" && child.name === "Decision Note Body") {
+        history = child;
+        break;
+      }
+    }
+  }
+
+  if (!header || !history) {
+    const oldEntries = container.children.filter(function (child) {
+      return child.type === "FRAME" && child.name === "Decision Note Entry";
+    });
+
+    if (oldEntries.length > 0) {
+      const convertedGroups = [];
+      for (const oldEntry of oldEntries) {
+        let oldBody = null;
+        for (const child of oldEntry.children) {
+          if (child.type === "FRAME" && child.name === "Decision Note Body") {
+            oldBody = child;
+            break;
+          }
+        }
+        if (!oldBody || oldBody.children.length === 0) continue;
+        convertedGroups.push(wrapNodesIntoGroup(oldBody.children.slice()));
+      }
+
+      clearChildren(container);
+      header = figma.createFrame();
+      history = figma.createFrame();
+      styleHeader(header);
+      styleHistory(history);
+      container.appendChild(header);
+      container.appendChild(history);
+
+      convertedGroups.forEach(function (group, idx) {
+        history.appendChild(group);
+        if (idx < convertedGroups.length - 1) {
+          history.appendChild(createDivider());
+        }
+      });
+    }
+  }
+
+  if (!header || !history) {
+    clearChildren(container);
+    header = figma.createFrame();
+    history = figma.createFrame();
+    styleHeader(header);
+    styleHistory(history);
+    container.appendChild(header);
+    container.appendChild(history);
+  } else {
+    styleHeader(header);
+    styleHistory(history);
+  }
+
+  if (history.children.length > 0) {
+    const hasGroupedEntries = history.children.some(function (child) {
+      return child.name === "Decision Note Group";
+    });
+    if (!hasGroupedEntries) {
+      const legacyNodes = history.children.slice();
+      clearChildren(history);
+      history.appendChild(wrapNodesIntoGroup(legacyNodes));
+    }
+  }
+
+  const entry = createEntryGroup();
 
   // --- Status Pill ---
   const pillColors = getStatusPill(data.status);
@@ -359,9 +469,9 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
   pillText.fills = [{ type: "SOLID", color: rgbFromHex(pillColors.text) }];
   pillText.characters = getStateLabel(data.status);
   pill.appendChild(pillText);
-  body.appendChild(pill);
+  entry.appendChild(pill);
 
-  addWrappedText(body, String(data.decision || ""), {
+  addWrappedText(entry, String(data.decision || ""), {
     size: 15,
     bold: false,
     wrapWidth: BODY_WRAP,
@@ -392,8 +502,9 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
     });
   }
 
-  const createdDate = data.date && String(data.date).trim() ? String(data.date).trim() : today();
-  addWrappedText(meta, "Created: " + createdDate, {
+  const entryDate = data.date && String(data.date).trim() ? String(data.date).trim() : today();
+  const entryDateLabel = isUpdate ? "Updated" : "Created";
+  addWrappedText(meta, entryDateLabel + ": " + entryDate, {
     size: 14,
     bold: false,
     wrapWidth: BODY_WRAP,
@@ -401,14 +512,24 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
     opacity: 0.6
   });
 
-  body.appendChild(meta);
-  container.appendChild(header);
-  container.appendChild(body);
+  entry.appendChild(meta);
+
+  const hasExistingHistory = history.children.length > 0;
+  if (isUpdate && hasExistingHistory) {
+    history.insertChild(0, entry);
+    history.insertChild(1, createDivider());
+  } else if (isUpdate) {
+    history.insertChild(0, entry);
+  } else {
+    history.appendChild(entry);
+  }
 
   // Final width enforcement only (never touch height)
   setFixedWidth(container, WIDTH);
   setFixedWidth(header, WIDTH);
-  setFixedWidth(body, WIDTH);
+  setFixedWidth(history, WIDTH);
+  setFixedWidth(entry, BODY_WRAP);
+  setFixedWidth(header, WIDTH);
   setFixedWidth(meta, BODY_WRAP);
 
   if (!hasTargetNode && isNewContainer) {
