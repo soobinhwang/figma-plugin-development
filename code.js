@@ -421,20 +421,13 @@ figma.ui.onmessage = async function (msg) {
 
   if (msg.type === "INIT") {
     const node = getTargetNode();
-    const contextId = getContextId(node);
-    const defaults = {
+    const data = {
       decision: "",
       status: DEFAULT_STATE_ID,
       source: "",
       date: today(),
       theme: "light"
     };
-
-    const stored = await loadData(contextId);
-    const data = normalizeStoredData(stored, defaults);
-    if (JSON.stringify(stored || {}) !== JSON.stringify(data)) {
-      await saveData(contextId, data);
-    }
     figma.ui.postMessage({
       type: "LOAD",
       data: data,
