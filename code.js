@@ -82,6 +82,44 @@ function getSelectionContext() {
   };
 }
 
+function getThemeFromNoteContainer(noteContainer) {
+  if (!noteContainer || noteContainer.type !== "FRAME") return "light";
+
+  const storedTheme = noteContainer.getPluginData("decisionNoteTheme");
+  if (storedTheme === "dark" || storedTheme === "light") return storedTheme;
+
+  let header = null;
+  for (const child of noteContainer.children) {
+    if (child.type === "FRAME" && child.name === "Decision Note Header") {
+      header = child;
+      break;
+    }
+  }
+
+  if (!header) {
+    for (const child of noteContainer.children) {
+      if (child.type !== "FRAME" || child.name !== "Decision Note Entry") continue;
+      for (const nested of child.children) {
+        if (nested.type === "FRAME" && nested.name === "Decision Note Header") {
+          header = nested;
+          break;
+        }
+      }
+      if (header) break;
+    }
+  }
+
+  if (!header || header.fills === figma.mixed || !header.fills || header.fills.length === 0) {
+    return "light";
+  }
+
+  const fill = header.fills[0];
+  if (fill.type !== "SOLID" || !fill.color) return "light";
+
+  const luminance = (0.299 * fill.color.r) + (0.587 * fill.color.g) + (0.114 * fill.color.b);
+  return luminance < 0.5 ? "dark" : "light";
+}
+
 async function loadData(nodeId) {
   return await figma.clientStorage.getAsync(STORAGE_PREFIX + nodeId);
 }
@@ -248,6 +286,7 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
   container.name = containerName;
   container.setPluginData("decisionNoteTargetId", hasTargetNode ? targetNode.id : "");
   container.setPluginData("decisionNoteMode", hasTargetNode ? "target" : "canvas");
+  container.setPluginData("decisionNoteTheme", data.theme === "dark" ? "dark" : "light");
 
   // --- Container ---
   container.layoutMode = "VERTICAL";
@@ -279,7 +318,7 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
     const divider = figma.createLine();
     divider.name = "Decision Note Divider";
     divider.resizeWithoutConstraints(BODY_WRAP, 0);
-    divider.strokes = [{ type: "SOLID", color: rgbFromHex("#D6D6D6") }];
+    divider.strokes = [{ type: "SOLID", color: rgbFromHex(data.theme === "dark" ? "#444444" : "#D6D6D6") }];
     divider.strokeWeight = 1;
     divider.dashPattern = [4, 4];
     divider.effects = [];
@@ -560,12 +599,15 @@ figma.ui.onmessage = async function (msg) {
 
   if (msg.type === "INIT") {
     const selectionContext = getSelectionContext();
+    const selectedNoteTheme = selectionContext.selectedNoteContainer
+      ? getThemeFromNoteContainer(selectionContext.selectedNoteContainer)
+      : "light";
     const data = {
       decision: "",
       status: DEFAULT_STATE_ID,
       source: "",
       date: today(),
-      theme: "light"
+      theme: selectedNoteTheme
     };
     figma.ui.postMessage({
       type: "LOAD",
