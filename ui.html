@@ -142,6 +142,7 @@
     let currentTheme = "light";
     let currentDate = "";
     let lockedWidth = 0;
+    let hasReceivedInitialLoad = false;
 
     function setNoteTheme(theme) {
       currentTheme = theme === "dark" ? "dark" : "light";
@@ -230,10 +231,10 @@
           </select>
 
           <label>Design Decision</label>
-          <textarea id="decision" class="decision-input" placeholder="What was decided?">${data.decision || ""}</textarea>
+          <textarea id="decision" class="decision-input" placeholder="">${data.decision || ""}</textarea>
 
           <label>Decision Source <span class="optional">(Optional)</span></label>
-          <input id="source" placeholder="Who provided this information?" value="${data.source || ""}" />
+          <input id="source" placeholder="e.g., PM, Design Lead, Engineer" value="${data.source || ""}" />
 
           <label>Interface Theme</label>
           <button type="button" class="theme-option" data-theme-value="light" aria-pressed="false">
@@ -270,11 +271,11 @@
       if (!msg) return;
 
       if (msg.type === "LOAD") {
-        const formExists = content.querySelector(".form");
-        if (formExists) {
-          updateBanner(msg.selection);
-        } else {
+        if (!hasReceivedInitialLoad) {
+          hasReceivedInitialLoad = true;
           renderForm(msg.data, msg.selection, msg.stateOptions);
+        } else {
+          updateBanner(msg.selection);
         }
       }
       if (msg.type === "REFRESH") {
@@ -290,7 +291,10 @@
       const decision = document.getElementById("decision");
       const status = document.getElementById("status");
       const source = document.getElementById("source");
-      if (!decision || !status || !source) return;
+      if (!decision || !status || !source) {
+        parent.postMessage({ pluginMessage: { type: "INIT" } }, "*");
+        return;
+      }
 
       parent.postMessage({
         pluginMessage: {
@@ -306,9 +310,13 @@
       }, "*");
     };
 
-    setNoteTheme("light");
-    setFooterState(false);
-    requestResize();
+    renderForm({
+      decision: "",
+      status: DEFAULT_STATE_OPTIONS[0].id,
+      source: "",
+      date: new Date().toISOString().slice(0, 10),
+      theme: "light"
+    }, null, DEFAULT_STATE_OPTIONS);
     parent.postMessage({ pluginMessage: { type: "INIT" } }, "*");
   </script>
 </body>

@@ -64,60 +64,74 @@ function isDecisionNoteContainer(node) {
   return mode === "target" || mode === "canvas";
 }
 
-function getSelectionContext() {
+function getNearestDecisionNoteContainer(node) {
+  let current = node || null;
+  while (current && current.type !== "PAGE" && current.type !== "DOCUMENT") {
+    if (isDecisionNoteContainer(current)) return current;
+    current = current.parent || null;
+  }
+  return null;
+}
+
+async function getSelectionContext() {
   const node = figma.currentPage.selection[0];
-  if (!isFrameOrSection(node)) {
+  if (!node) {
     return { targetNode: null, selectedNoteContainer: null };
   }
 
-  if (!isDecisionNoteContainer(node)) {
+  const selectedOrAncestorNoteContainer = getNearestDecisionNoteContainer(node);
+  if (selectedOrAncestorNoteContainer) {
+    const linkedTargetId = selectedOrAncestorNoteContainer.getPluginData("decisionNoteTargetId");
+    let linkedTarget = null;
+    if (linkedTargetId) {
+      try {
+        linkedTarget = await figma.getNodeByIdAsync(linkedTargetId);
+      } catch (e) {
+        console.log("getNodeByIdAsync failed:", e);
+      }
+    }
+    return {
+      targetNode: isFrameOrSection(linkedTarget) ? linkedTarget : null,
+      selectedNoteContainer: selectedOrAncestorNoteContainer
+    };
+  }
+
+  if (isFrameOrSection(node)) {
     return { targetNode: node, selectedNoteContainer: null };
   }
 
-  const linkedTargetId = node.getPluginData("decisionNoteTargetId");
-  const linkedTarget = linkedTargetId ? figma.getNodeById(linkedTargetId) : null;
-  return {
-    targetNode: isFrameOrSection(linkedTarget) ? linkedTarget : null,
-    selectedNoteContainer: node
-  };
+  return { targetNode: null, selectedNoteContainer: null };
 }
 
 function getThemeFromNoteContainer(noteContainer) {
-  if (!noteContainer || noteContainer.type !== "FRAME") return "light";
+  try {
+    if (!noteContainer || noteContainer.type !== "FRAME") return "light";
 
-  const storedTheme = noteContainer.getPluginData("decisionNoteTheme");
-  if (storedTheme === "dark" || storedTheme === "light") return storedTheme;
+    const storedTheme = noteContainer.getPluginData("decisionNoteTheme");
+    if (storedTheme === "dark" || storedTheme === "light") return storedTheme;
 
-  let header = null;
-  for (const child of noteContainer.children) {
-    if (child.type === "FRAME" && child.name === "Decision Note Header") {
-      header = child;
-      break;
-    }
-  }
-
-  if (!header) {
+    // Backward compatibility for notes created before theme plugin data existed.
+    let header = null;
     for (const child of noteContainer.children) {
-      if (child.type !== "FRAME" || child.name !== "Decision Note Entry") continue;
-      for (const nested of child.children) {
-        if (nested.type === "FRAME" && nested.name === "Decision Note Header") {
-          header = nested;
-          break;
-        }
+      if (child.type === "FRAME" && child.name === "Decision Note Header") {
+        header = child;
+        break;
       }
-      if (header) break;
     }
-  }
 
-  if (!header || header.fills === figma.mixed || !header.fills || header.fills.length === 0) {
+    if (!header) return "light";
+    const fills = header.fills;
+    if (!Array.isArray(fills) || fills.length === 0) return "light";
+
+    const fill = fills[0];
+    if (fill.type !== "SOLID") return "light";
+
+    const luminance = (0.299 * fill.color.r) + (0.587 * fill.color.g) + (0.114 * fill.color.b);
+    return luminance < 0.5 ? "dark" : "light";
+  } catch (e) {
+    console.log("THEME DETECTION ERROR:", e);
     return "light";
   }
-
-  const fill = header.fills[0];
-  if (fill.type !== "SOLID" || !fill.color) return "light";
-
-  const luminance = (0.299 * fill.color.r) + (0.587 * fill.color.g) + (0.114 * fill.color.b);
-  return luminance < 0.5 ? "dark" : "light";
 }
 
 async function loadData(nodeId) {
@@ -315,13 +329,33 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
   }
 
   function createDivider() {
-    const divider = figma.createLine();
+    const dividerColor = rgbFromHex(data.theme === "dark" ? "#444444" : "#D6D6D6");
+    const divider = figma.createFrame();
     divider.name = "Decision Note Divider";
-    divider.resizeWithoutConstraints(BODY_WRAP, 0);
-    divider.strokes = [{ type: "SOLID", color: rgbFromHex(data.theme === "dark" ? "#444444" : "#D6D6D6") }];
-    divider.strokeWeight = 1;
-    divider.dashPattern = [4, 4];
+    divider.layoutMode = "HORIZONTAL";
+    divider.itemSpacing = 4;
+    divider.primaryAxisSizingMode = "FIXED";
+    divider.counterAxisSizingMode = "FIXED";
+    divider.primaryAxisAlignItems = "MIN";
+    divider.counterAxisAlignItems = "CENTER";
+    divider.clipsContent = true;
+    divider.fills = [];
+    divider.strokes = [];
     divider.effects = [];
+    divider.resizeWithoutConstraints(BODY_WRAP, 1);
+
+    const dashWidth = 4;
+    const dashGap = 4;
+    const dashCount = Math.max(1, Math.floor((BODY_WRAP + dashGap) / (dashWidth + dashGap)));
+    for (let i = 0; i < dashCount; i += 1) {
+      const dash = figma.createRectangle();
+      dash.name = "Dash";
+      dash.resizeWithoutConstraints(dashWidth, 1);
+      dash.fills = [{ type: "SOLID", color: dividerColor }];
+      dash.strokes = [];
+      dash.effects = [];
+      divider.appendChild(dash);
+    }
     return divider;
   }
 
@@ -598,29 +632,47 @@ figma.ui.onmessage = async function (msg) {
   }
 
   if (msg.type === "INIT") {
-    const selectionContext = getSelectionContext();
-    const selectedNoteTheme = selectionContext.selectedNoteContainer
-      ? getThemeFromNoteContainer(selectionContext.selectedNoteContainer)
-      : "light";
-    const data = {
-      decision: "",
-      status: DEFAULT_STATE_ID,
-      source: "",
-      date: today(),
-      theme: selectedNoteTheme
-    };
-    figma.ui.postMessage({
-      type: "LOAD",
-      data: data,
-      stateOptions: STATE_OPTIONS.map(function (option) {
-        return { id: option.id, label: option.label };
-      }),
-      selection: selectionContext.targetNode
-        ? { name: selectionContext.targetNode.name }
-        : (selectionContext.selectedNoteContainer
-          ? { name: selectionContext.selectedNoteContainer.name }
-          : null)
-    });
+    try {
+      const selectionContext = await getSelectionContext();
+      const selectedNoteTheme = selectionContext.selectedNoteContainer
+        ? getThemeFromNoteContainer(selectionContext.selectedNoteContainer)
+        : "light";
+      const data = {
+        decision: "",
+        status: DEFAULT_STATE_ID,
+        source: "",
+        date: today(),
+        theme: selectedNoteTheme
+      };
+      figma.ui.postMessage({
+        type: "LOAD",
+        data: data,
+        stateOptions: STATE_OPTIONS.map(function (option) {
+          return { id: option.id, label: option.label };
+        }),
+        selection: selectionContext.targetNode
+          ? { name: selectionContext.targetNode.name }
+          : (selectionContext.selectedNoteContainer
+            ? { name: selectionContext.selectedNoteContainer.name }
+            : null)
+      });
+    } catch (e) {
+      console.log("INIT ERROR:", e);
+      figma.ui.postMessage({
+        type: "LOAD",
+        data: {
+          decision: "",
+          status: DEFAULT_STATE_ID,
+          source: "",
+          date: today(),
+          theme: "light"
+        },
+        stateOptions: STATE_OPTIONS.map(function (option) {
+          return { id: option.id, label: option.label };
+        }),
+        selection: null
+      });
+    }
     return;
   }
 
@@ -630,7 +682,7 @@ figma.ui.onmessage = async function (msg) {
   }
 
   if (msg.type === "SAVE") {
-    const selectionContext = getSelectionContext();
+    const selectionContext = await getSelectionContext();
     const node = selectionContext.targetNode;
     const selectedNoteContainer = selectionContext.selectedNoteContainer;
 
@@ -652,7 +704,8 @@ figma.ui.onmessage = async function (msg) {
       figma.notify("Decision saved.");
       figma.closePlugin();
     } catch (e) {
-      figma.notify("Save failed. Check console.");
+      const message = (e && e.message) ? e.message : String(e);
+      figma.notify("Save failed: " + message);
       console.log("SAVE ERROR:", e);
     }
   }
