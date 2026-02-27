@@ -12,22 +12,22 @@ const CANVAS_CONTEXT_ID = "__canvas__";
 const STATE_OPTIONS = [
   {
     id: "needs_clarification",
-    label: "❓ Needs Clarification",
+    label: "Needs Clarification",
     pill: { bg: "#FFF3CD", text: "#856404" }
   },
   {
     id: "in_progress",
-    label: "⏳ In Progress",
+    label: "In Progress",
     pill: { bg: "#FFD6E0", text: "#9B2C4E" }
   },
   {
     id: "in_review",
-    label: "👀 In Review",
+    label: "In Review",
     pill: { bg: "#D0E8FF", text: "#1A5276" }
   },
   {
     id: "completed",
-    label: "✅ Completed",
+    label: "Completed",
     pill: { bg: "#D4EDDA", text: "#276749" }
   }
 ];
@@ -43,6 +43,10 @@ LEGACY_STATE_LABEL_TO_ID["Confirmed"] = "completed";
 LEGACY_STATE_LABEL_TO_ID["Complete"] = "completed";
 LEGACY_STATE_LABEL_TO_ID["In process"] = "in_progress";
 LEGACY_STATE_LABEL_TO_ID["In Process"] = "in_progress";
+LEGACY_STATE_LABEL_TO_ID["❓ Needs Clarification"] = "needs_clarification";
+LEGACY_STATE_LABEL_TO_ID["⏳ In Progress"] = "in_progress";
+LEGACY_STATE_LABEL_TO_ID["👀 In Review"] = "in_review";
+LEGACY_STATE_LABEL_TO_ID["✅ Completed"] = "completed";
 STATE_BY_ID.needs_iteration = STATE_BY_ID.in_progress;
 STATE_BY_ID.confirmed = STATE_BY_ID.completed;
 
@@ -50,10 +54,32 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function getTargetNode() {
+function isFrameOrSection(node) {
+  return !!node && (node.type === "FRAME" || node.type === "SECTION");
+}
+
+function isDecisionNoteContainer(node) {
+  if (!node || node.type !== "FRAME") return false;
+  const mode = node.getPluginData("decisionNoteMode");
+  return mode === "target" || mode === "canvas";
+}
+
+function getSelectionContext() {
   const node = figma.currentPage.selection[0];
-  if (!node) return null;
-  return node.type === "FRAME" || node.type === "SECTION" ? node : null;
+  if (!isFrameOrSection(node)) {
+    return { targetNode: null, selectedNoteContainer: null };
+  }
+
+  if (!isDecisionNoteContainer(node)) {
+    return { targetNode: node, selectedNoteContainer: null };
+  }
+
+  const linkedTargetId = node.getPluginData("decisionNoteTargetId");
+  const linkedTarget = linkedTargetId ? figma.getNodeById(linkedTargetId) : null;
+  return {
+    targetNode: isFrameOrSection(linkedTarget) ? linkedTarget : null,
+    selectedNoteContainer: node
+  };
 }
 
 async function loadData(nodeId) {
@@ -64,8 +90,10 @@ async function saveData(nodeId, data) {
   await figma.clientStorage.setAsync(STORAGE_PREFIX + nodeId, data);
 }
 
-function getContextId(targetNode) {
-  return targetNode ? targetNode.id : CANVAS_CONTEXT_ID;
+function getContextId(selectionContext) {
+  if (selectionContext.targetNode) return selectionContext.targetNode.id;
+  if (selectionContext.selectedNoteContainer) return selectionContext.selectedNoteContainer.id;
+  return CANVAS_CONTEXT_ID;
 }
 
 function normalizeStateId(value, fallbackStateId) {
@@ -185,7 +213,7 @@ function addWrappedText(parent, text, opts) {
   return t;
 }
 
-async function createOrUpdateNote(targetNode, data) {
+async function createOrUpdateNote(targetNode, data, preferredContainer) {
   await ensureFonts();
   const palette = getNotePalette(data.theme);
   const hasTargetNode = !!targetNode;
@@ -202,19 +230,9 @@ async function createOrUpdateNote(targetNode, data) {
   const HEADER_WRAP = WIDTH - HEADER_PAD_X * 2;
   const BODY_WRAP = WIDTH - BODY_PAD * 2;
 
-  const legacyContainerName = hasTargetNode ? ("Decision Note Container for " + targetNode.id) : "";
   const containerName = hasTargetNode ? ("For " + targetNode.name) : "For Canvas";
-  let container = figma.currentPage.findOne(function (n) {
-    if (n.type !== "FRAME") return false;
-    if (hasTargetNode) {
-      return (
-        n.getPluginData("decisionNoteTargetId") === targetNode.id ||
-        n.name === legacyContainerName ||
-        n.name === containerName
-      );
-    }
-    return n.getPluginData("decisionNoteMode") === "canvas" || n.name === containerName;
-  });
+  let container = preferredContainer || null;
+  let isNewContainer = !container;
 
   if (!container) {
     container = figma.createFrame();
@@ -393,7 +411,7 @@ async function createOrUpdateNote(targetNode, data) {
   setFixedWidth(body, WIDTH);
   setFixedWidth(meta, BODY_WRAP);
 
-  if (!hasTargetNode) {
+  if (!hasTargetNode && isNewContainer) {
     container.x = figma.viewport.center.x - WIDTH / 2;
     container.y = figma.viewport.center.y - container.height / 2;
   }
@@ -420,7 +438,7 @@ figma.ui.onmessage = async function (msg) {
   }
 
   if (msg.type === "INIT") {
-    const node = getTargetNode();
+    const selectionContext = getSelectionContext();
     const data = {
       decision: "",
       status: DEFAULT_STATE_ID,
@@ -434,7 +452,11 @@ figma.ui.onmessage = async function (msg) {
       stateOptions: STATE_OPTIONS.map(function (option) {
         return { id: option.id, label: option.label };
       }),
-      selection: node ? { name: node.name } : null
+      selection: selectionContext.targetNode
+        ? { name: selectionContext.targetNode.name }
+        : (selectionContext.selectedNoteContainer
+          ? { name: selectionContext.selectedNoteContainer.name }
+          : null)
     });
     return;
   }
@@ -445,7 +467,9 @@ figma.ui.onmessage = async function (msg) {
   }
 
   if (msg.type === "SAVE") {
-    const node = getTargetNode();
+    const selectionContext = getSelectionContext();
+    const node = selectionContext.targetNode;
+    const selectedNoteContainer = selectionContext.selectedNoteContainer;
 
     if (!msg.data || !msg.data.decision || !String(msg.data.decision).trim()) {
       figma.notify("Design Decision is required.");
@@ -460,8 +484,8 @@ figma.ui.onmessage = async function (msg) {
         date: msg.data.date,
         theme: msg.data.theme === "dark" ? "dark" : "light"
       };
-      await saveData(getContextId(node), payload);
-      await createOrUpdateNote(node, payload);
+      await saveData(getContextId(selectionContext), payload);
+      await createOrUpdateNote(node, payload, selectedNoteContainer);
       figma.notify("Decision saved.");
       figma.closePlugin();
     } catch (e) {
