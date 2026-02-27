@@ -230,7 +230,7 @@ async function createOrUpdateNote(targetNode, data, preferredContainer) {
   const HEADER_WRAP = WIDTH - HEADER_PAD_X * 2;
   const BODY_WRAP = WIDTH - BODY_PAD * 2;
 
-  const containerName = hasTargetNode ? ("For " + targetNode.name) : "For Canvas";
+  const containerName = hasTargetNode ? ("For " + targetNode.name) : "Note";
   let container = preferredContainer || null;
   let isNewContainer = !container;
 
